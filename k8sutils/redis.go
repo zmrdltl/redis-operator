@@ -16,6 +16,11 @@ import (
 	"strings"
 )
 
+var (
+	execOut bytes.Buffer
+	execErr bytes.Buffer
+)
+
 // RedisDetails will hold the information for Redis Pod
 type RedisDetails struct {
 	PodName   string
@@ -228,10 +233,6 @@ func executeCommand(cr *redisv1beta1.Redis, cmd []string, podName string) {
 	if err != nil {
 		reqLogger.Error(err, "Failed to init executor")
 	}
-	var (
-		execOut bytes.Buffer
-		execErr bytes.Buffer
-	)
 
 	err = exec.Stream(remotecommand.StreamOptions{
 		Stdout: &execOut,
