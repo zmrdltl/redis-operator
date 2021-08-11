@@ -38,16 +38,20 @@ func getRedisServerIP(redisInfo RedisDetails) string {
 // ExecuteRedisClusterCommand will execute redis cluster creation command
 func ExecuteRedisClusterCommand(cr *redisv1beta1.RedisCluster) {
 	logger := generateRedisManagerLogger(cr.Namespace, cr.ObjectMeta.Name)
+	var redisNodes []string
 	replicas := cr.Spec.Size
-	cmd := []string{"redis-cli", "--cluster", "create"}
+	cmd := []string{"create-cluster.sh"}
 	for podCount := 0; podCount <= int(*replicas)-1; podCount++ {
 		pod := RedisDetails{
 			PodName:   cr.ObjectMeta.Name + "-leader-" + strconv.Itoa(podCount),
 			Namespace: cr.Namespace,
 		}
-		cmd = append(cmd, getRedisServerIP(pod)+":6379")
+		redisNodes = append(redisNodes, getRedisServerIP(pod)+":6379")
+		// cmd = append(cmd, getRedisServerIP(pod)+":6379")
 	}
-	cmd = append(cmd, "--cluster-yes")
+	redisNodesString := strings.Join(redisNodes, " ")
+	cmd = append(cmd, redisNodesString)
+	// cmd = append(cmd, "--cluster-yes")
 
 	if cr.Spec.KubernetesConfig.ExistingPasswordSecret != nil {
 		pass, err := getRedisPassword(cr.Namespace, *cr.Spec.KubernetesConfig.ExistingPasswordSecret.Name, *cr.Spec.KubernetesConfig.ExistingPasswordSecret.Key)
@@ -58,7 +62,10 @@ func ExecuteRedisClusterCommand(cr *redisv1beta1.RedisCluster) {
 		cmd = append(cmd, pass)
 	}
 	logger.Info("Redis cluster creation command is", "Command", cmd)
-	executeCommand(cr, cmd, cr.ObjectMeta.Name+"-leader-0")
+	err := executeCommand(cr, cmd, cr.ObjectMeta.Name+"-leader-0")
+	if err != nil {
+		logger.Error(err, "Error in executing command")
+	}
 }
 
 // createRedisReplicationCommand will create redis replication creation command
@@ -99,7 +106,7 @@ func ExecuteRedisReplicationCommand(cr *redisv1beta1.RedisCluster) {
 		if !checkRedisNodePresence(cr, nodes, podIP) {
 			logger.Info("Adding node to cluster.", "Node.IP", podIP, "Follower.Pod", followerPod)
 			cmd := createRedisReplicationCommand(cr, leaderPod, followerPod)
-			executeCommand(cr, cmd, cr.ObjectMeta.Name+"-leader-0")
+			_ = executeCommand(cr, cmd, cr.ObjectMeta.Name+"-leader-0")
 		} else {
 			logger.Info("Skipping Adding node to cluster, already present.", "Follower.Pod", followerPod)
 		}
@@ -240,7 +247,7 @@ func configureRedisClient(cr *redisv1beta1.RedisCluster, podName string) *redis.
 }
 
 // executeCommand will execute the commands in pod
-func executeCommand(cr *redisv1beta1.RedisCluster, cmd []string, podName string) {
+func executeCommand(cr *redisv1beta1.RedisCluster, cmd []string, podName string) error {
 	var (
 		execOut bytes.Buffer
 		execErr bytes.Buffer
@@ -249,10 +256,12 @@ func executeCommand(cr *redisv1beta1.RedisCluster, cmd []string, podName string)
 	config, err := generateK8sConfig()
 	if err != nil {
 		logger.Error(err, "Could not find pod to execute")
+		return err
 	}
 	targetContainer, pod := getContainerID(cr, podName)
 	if targetContainer < 0 {
 		logger.Error(err, "Could not find pod to execute")
+		return err
 	}
 
 	req := generateK8sClient().CoreV1().RESTClient().Post().Resource("pods").Name(podName).Namespace(cr.Namespace).SubResource("exec")
@@ -265,6 +274,7 @@ func executeCommand(cr *redisv1beta1.RedisCluster, cmd []string, podName string)
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
 	if err != nil {
 		logger.Error(err, "Failed to init executor")
+		return err
 	}
 
 	err = exec.Stream(remotecommand.StreamOptions{
@@ -274,8 +284,10 @@ func executeCommand(cr *redisv1beta1.RedisCluster, cmd []string, podName string)
 	})
 	if err != nil {
 		logger.Error(err, "Could not execute command", "Command", cmd, "Output", execOut.String(), "Error", execErr.String())
+		return err
 	}
 	logger.Info("Successfully executed the command", "Command", cmd, "Output", execOut.String())
+	return nil
 }
 
 // getContainerID will return the id of container from pod
