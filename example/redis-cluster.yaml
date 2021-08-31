@@ -6,7 +6,7 @@ metadata:
 spec:
   clusterSize: 3
   kubernetesConfig:
-    image: quay.io/opstree/redis:v6.2
+    image: quay.io/opstree/redis:v5.0.0
     imagePullPolicy: Always
     resources:
       requests:
@@ -32,8 +32,28 @@ spec:
         memory: 128Mi
   redisLeader:
     serviceType: LoadBalancer
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - redis-cluster-leader
+            topologyKey: "kubernetes.io/hostname"
   redisFollower:
     serviceType: LoadBalancer
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - redis-cluster-follower
+            topologyKey: "kubernetes.io/hostname"
   # redisConfig: {}
   storage:
     volumeClaimTemplate:
